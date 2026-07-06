@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#141519">
+<title>coach-os · treino</title>
+<style>
+  :root{
+    --bg:#141519; --surface:#1C1E24; --surface2:#23262D; --line:#2E323B;
+    --text:#EAE7E1; --dim:#8B909B; --faint:#565B66; --amber:#EE7B30; --amber-ink:#141519; --ok:#6FA471; --err:#D05050;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
+  body{margin:0; min-height:100vh; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  button{font-family:inherit; cursor:pointer}
+  #app{max-width:620px; margin:0 auto; padding:0 16px 150px}
+  .kicker{font-size:11px; letter-spacing:3px; color:var(--amber); text-transform:uppercase; font-weight:700}
+  .card{border:1px solid var(--line); border-radius:14px; background:var(--surface)}
+  input{background:var(--surface2); border:1px solid var(--line); color:var(--text); border-radius:10px;
+    padding:11px 12px; font-size:14px; width:100%}
+  input:focus{outline:none; border-color:var(--amber)}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="timerbar"></div>
+<div id="toast" style="position:fixed;top:12px;left:12px;right:12px;z-index:60;display:none"></div>
+<script>
+// ── coach-app · superfície de captura do coach-os ──────────────────────
+// Plano vem de Sants-M13/coach-os/treino/planos/current.json (privado, via PAT)
+// Sessão finalizada → commit em treino/logs/AAAA-MM/AAAA-MM-DD-<dia>.json
+const OWNER="Sants-M13", REPO="coach-os", API="https://api.github.com";
+
+// Fallback embutido (usado sem token / sem rede) — espelho do current.json
+const FALLBACK_PLAN={
+  plano:"A — KB puro (fase de aprendizado)",
+  warmup:[
+    {name:"Halo",dose:"5 / direção",desc:"KB circula em volta da cabeça, perto. Acorda o ombro."},
+    {name:"Figure 8",dose:"30 s",desc:"Desenha um 8 entre as pernas, mão em mão. Hinge, costas retas."},
+    {name:"Around the world",dose:"5 / direção",desc:"Volta na cintura, mão em mão atrás. Tronco parado, só o KB gira."},
+    {name:"Goblet squat",dose:"5 lentos",desc:"Embaixo do queixo, desce controlado."},
+    {name:"Swing leve",dose:"10",desc:"Ativa o hinge antes do trabalho pesado."}],
+  warmup_b_extra:[
+    {name:"Círculos de ombro",dose:"10 / lado",desc:"Ombro precisa acordar mais — tem get-up e press hoje."},
+    {name:"Get-up parcial vazio",dose:"3 / lado",desc:"Só até o cotovelo e volta. Sem peso."}],
+  templates:{
+    A:{label:"Balístico",sub:"hinge + potência",days:"Seg · Qui",ex:[
+      {id:"swing1",name:"KB Swing",w:24,hint:"24 kg",sets:5,reps:"10",rest:75},
+      {id:"goblet",name:"Goblet squat",w:16,hint:"16 → 24 kg",sets:4,reps:"8",rest:60},
+      {id:"clean",name:"Clean unilateral",w:16,hint:"16 kg",sets:3,reps:"5 / lado",rest:60},
+      {id:"swing2",name:"KB Swing — fechar",w:24,hint:"24 kg",sets:3,reps:"10",rest:75}]},
+    B:{label:"Grind",sub:"técnica + força lenta",days:"Ter · Sex",ex:[
+      {id:"getup",name:"Turkish get-up",w:16,hint:"16 kg ou vazio",sets:5,reps:"1 / lado",rest:90,
+       note:"Progressão: punho vazio → garrafinha no punho → 16 kg só quando o padrão sair fluido. Não força."},
+      {id:"press",name:"Military press unilateral",w:16,hint:"16 kg",sets:4,reps:"5 / lado",rest:75},
+      {id:"row",name:"Single-arm row",w:24,hint:"24 kg",sets:4,reps:"8 / lado",rest:60},
+      {id:"gobletB",name:"Goblet squat",w:16,hint:"16 kg",sets:3,reps:"10",rest:60}]}},
+  regras:["Nunca à falha — deixa 2-3 reps no tanque","Anota a carga — busca +1 rep ou +carga toda semana","Proteína ~180 g no dia · déficit moderado"]
+};
+
+// ── estado ──
+let PLAN=FALLBACK_PLAN, planSource="embutido";
+let day=null, checks={}, weights={}, warmOpen=true, startedAt=null, finalized=false;
+let timer=null, timerInterval=null, wakeLock=null, timerFired=false;
+let showConfig=false, uploading=false;
+
+const todayStr=()=>new Date().toLocaleDateString("en-CA");
+const fmt=s=>`${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`;
+const store={get:k=>{try{return localStorage.getItem(k)}catch(e){return null}},
+             set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}},
+             del:k=>{try{localStorage.removeItem(k)}catch(e){}}};
+const token=()=>store.get("gh-token")||"";
+
+function defaultDay(){
+  const map={1:"A",2:"B",4:"A",5:"B"};
+  return map[new Date().getDay()]||"A";
+}
+
+function loadSession(){
+  weights=JSON.parse(store.get("kb-weights")||"{}");
+  try{
+    const s=JSON.parse(store.get("kb-session")||"null");
+    if(s&&s.date===todayStr()){checks=s.checks||{};day=s.day||defaultDay();startedAt=s.startedAt||null;finalized=!!s.finalized;}
+    else{day=defaultDay();}
+  }catch(e){day=defaultDay();}
+}
+function saveSession(){
+  store.set("kb-weights",JSON.stringify(weights));
+  store.set("kb-session",JSON.stringify({date:todayStr(),day,checks,startedAt,finalized}));
+}
+
+// ── som + vibração ──
+function ping(){try{const Ctx=window.AudioContext||window.webkitAudioContext;const ctx=new Ctx();
+  [0,0.18].forEach(t=>{const o=ctx.createOscillator(),g=ctx.createGain();o.connect(g);g.connect(ctx.destination);
+    o.type="sine";o.frequency.value=880;const s=ctx.currentTime+t;
+    g.gain.setValueAtTime(0.0001,s);g.gain.exponentialRampToValueAtTime(0.35,s+0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001,s+0.14);o.start(s);o.stop(s+0.16);});}catch(e){}}
+const buzz=ms=>{try{navigator.vibrate&&navigator.vibrate(ms)}catch(e){}};
+
+// ── timer ──
+function startRest(secs,label){
+  timerFired=false;
+  timer={endsAt:Date.now()+secs*1000,total:secs,label};
+  if(timerInterval)clearInterval(timerInterval);
+  timerInterval=setInterval(tickTimer,200);
+  if(navigator.wakeLock)navigator.wakeLock.request("screen").then(w=>wakeLock=w).catch(()=>{});
+  renderTimer();
+}
+function stopTimer(){
+  timer=null;
+  if(timerInterval){clearInterval(timerInterval);timerInterval=null;}
+  if(wakeLock){try{wakeLock.release()}catch(e){} wakeLock=null;}
+  renderTimer();
+}
+function tickTimer(){
+  if(!timer)return;
+  const rem=Math.max(0,Math.round((timer.endsAt-Date.now())/1000));
+  if(rem<=0&&!timerFired){timerFired=true;ping();buzz([120,60,120]);stopTimer();return;}
+  renderTimer();
+}
+
+// ── GitHub API ──
+async function gh(path,opts={}){
+  const r=await fetch(API+path,{...opts,headers:{
+    "Authorization":"Bearer "+token(),"Accept":"application/vnd.github+json",
+    "X-GitHub-Api-Version":"2022-11-28",...(opts.headers||{})}});
+  if(!r.ok&&r.status!==404)throw new Error("GitHub "+r.status);
+  return r;
+}
+const b64=s=>btoa(unescape(encodeURIComponent(s)));
+const unb64=s=>decodeURIComponent(escape(atob(s)));
+
+async function fetchPlan(){
+  if(!token())return;
+  try{
+    const r=await gh(`/repos/${OWNER}/${REPO}/contents/treino/planos/current.json`);
+    if(r.status===404)return;
+    const j=await r.json();
+    const p=JSON.parse(unb64(j.content.replace(/\n/g,"")));
+    if(p.templates){PLAN=p;planSource="coach-os";render();}
+  }catch(e){}
+}
+
+function buildSessionJson(){
+  const tpl=PLAN.templates[day];
+  const exercicios=tpl.ex.map(ex=>{
+    const done=Array.from({length:ex.sets}).filter((_,i)=>checks[`${day}|${ex.id}|${i}`]).length;
+    return {exercicio:ex.name,carga_kg:weights[ex.id]??ex.w,series_plano:ex.sets,series_feitas:done,reps_alvo:ex.reps,descanso_s:ex.rest};
+  });
+  const warm=warmList();
+  const warmDone=warm.filter((_,i)=>checks[`${day}|wu|${i}`]).length;
+  const dur=startedAt?Math.round((Date.now()-startedAt)/60000):null;
+  return {
+    data:todayStr(),plano:PLAN.plano||"",template:day+" — "+tpl.label,
+    aquecimento:`${warmDone}/${warm.length}`,duracao_min:dur,
+    exercicios,origem:"coach-app",registrado_em:new Date().toISOString()
+  };
+}
+
+async function finalizeSession(){
+  if(!token()){showConfig=true;render();toast("Configura o token do GitHub primeiro (⚙).","err");return;}
+  uploading=true;render();
+  const s=buildSessionJson();
+  const ym=s.data.slice(0,7);
+  const path=`treino/logs/${ym}/${s.data}-${day.toLowerCase()}.json`;
+  try{
+    let sha;
+    const head=await gh(`/repos/${OWNER}/${REPO}/contents/${path}`);
+    if(head.status!==404){sha=(await head.json()).sha;}
+    const body={message:`treino: sessão ${day} ${s.data} (coach-app)`,content:b64(JSON.stringify(s,null,2))};
+    if(sha)body.sha=sha;
+    const put=await gh(`/repos/${OWNER}/${REPO}/contents/${path}`,{method:"PUT",body:JSON.stringify(body)});
+    if(!put.ok)throw new Error("PUT "+put.status);
+    finalized=true;store.del("pending-session");saveSession();
+    buzz(60);toast("Treino registrado no coach-os ✓","ok");
+  }catch(e){
+    store.set("pending-session",JSON.stringify({path,session:s}));
+    toast("Sem conexão com o GitHub — sessão guardada no celular. Tenta de novo depois.","err");
+  }
+  uploading=false;render();
+}
+async function retryPending(){
+  const p=store.get("pending-session");if(!p||!token())return;
+  try{
+    const {path,session}=JSON.parse(p);
+    let sha;const head=await gh(`/repos/${OWNER}/${REPO}/contents/${path}`);
+    if(head.status!==404){sha=(await head.json()).sha;}
+    const body={message:`treino: sessão ${session.data} (coach-app, retry)`,content:b64(JSON.stringify(session,null,2))};
+    if(sha)body.sha=sha;
+    const put=await gh(`/repos/${OWNER}/${REPO}/contents/${path}`,{method:"PUT",body:JSON.stringify(body)});
+    if(put.ok){store.del("pending-session");toast("Sessão pendente enviada ✓","ok");}
+  }catch(e){}
+}
+
+// ── interações ──
+function warmList(){return day==="B"?[...PLAN.warmup,...(PLAN.warmup_b_extra||[])]:PLAN.warmup;}
+function toggleWarm(i){checks[`${day}|wu|${i}`]=!checks[`${day}|wu|${i}`];if(!startedAt)startedAt=Date.now();saveSession();render();}
+function toggleSet(exId,rest,name,i){
+  const k=`${day}|${exId}|${i}`;const on=!checks[k];checks[k]=on;
+  if(!startedAt)startedAt=Date.now();
+  if(on){buzz(15);startRest(rest,name);}
+  saveSession();render();
+}
+function stepW(id,base,d){const cur=weights[id]??base;weights[id]=Math.max(2,cur+d);saveSession();render();}
+function setDay(d){day=d;saveSession();render();}
+function resetSession(){stopTimer();checks={};startedAt=null;finalized=false;saveSession();render();}
+function saveToken(){
+  const v=document.getElementById("tok").value.trim();
+  if(v)store.set("gh-token",v);else store.del("gh-token");
+  showConfig=false;render();fetchPlan();retryPending();
+}
+function toast(msg,kind){
+  const t=document.getElementById("toast");
+  t.style.display="block";
+  t.innerHTML=`<div style="max-width:620px;margin:0 auto;background:var(--surface2);border:1px solid var(${kind==="ok"?"--ok":"--err"});border-radius:12px;padding:12px 14px;font-size:13.5px">${msg}</div>`;
+  setTimeout(()=>{t.style.display="none"},4000);
+}
+
+// ── render ──
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function render(){
+  const tpl=PLAN.templates[day]||PLAN.templates.A;
+  const warm=warmList();
+  const totalSets=tpl.ex.reduce((a,e)=>a+e.sets,0);
+  const doneSets=tpl.ex.reduce((a,e)=>a+Array.from({length:e.sets}).filter((_,i)=>checks[`${day}|${e.id}|${i}`]).length,0);
+  const pct=totalSets?Math.round(doneSets/totalSets*100):0;
+  const hasTok=!!token();
+
+  let h=`
+  <header style="padding-top:22px;padding-bottom:6px">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
+      <div>
+        <div class="kicker">${esc(PLAN.plano||"coach-os")}</div>
+        <h1 style="margin:4px 0 0;font-size:26px;font-weight:800;letter-spacing:-0.5px">Treino de hoje</h1>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button onclick="showConfig=!showConfig;render()" aria-label="Configurações"
+          style="background:transparent;border:1px solid var(--line);color:${hasTok?"var(--ok)":"var(--amber)"};font-size:15px;width:34px;height:34px;border-radius:8px">⚙</button>
+        <button onclick="resetSession()"
+          style="background:transparent;border:1px solid var(--line);color:var(--dim);font-size:11px;padding:6px 10px;border-radius:8px;white-space:nowrap">Reiniciar</button>
+      </div>
+    </div>
+    <p style="margin:8px 0 0;font-size:12.5px;color:var(--faint);line-height:1.5">
+      Plano: <span class="mono" style="color:var(--dim)">${planSource}</span> · ${todayStr()}</p>
+  </header>`;
+
+  if(showConfig){
+    h+=`<section class="card" style="margin-top:12px;padding:15px">
+      <div style="font-size:11px;letter-spacing:2px;color:var(--dim);text-transform:uppercase;margin-bottom:9px">Conexão com o coach-os</div>
+      <p style="margin:0 0 10px;font-size:12.5px;color:var(--dim);line-height:1.55">
+        Token fine-grained do GitHub com acesso <b>só ao repo coach-os</b> (Contents: read/write).
+        Fica salvo apenas neste celular.</p>
+      <input id="tok" type="password" placeholder="github_pat_..." value="${esc(token())}">
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button onclick="saveToken()" style="flex:1;padding:11px;border-radius:10px;border:1px solid var(--amber);background:var(--amber);color:var(--amber-ink);font-weight:800;font-size:14px">Salvar</button>
+        <button onclick="showConfig=false;render()" style="padding:11px 14px;border-radius:10px;border:1px solid var(--line);background:transparent;color:var(--dim);font-size:14px">Fechar</button>
+      </div></section>`;
+  }
+
+  h+=`<div style="display:flex;gap:8px;margin-top:16px">`;
+  for(const d of Object.keys(PLAN.templates)){
+    const t=PLAN.templates[d],act=day===d;
+    h+=`<button onclick="setDay('${d}')" style="flex:1;padding:10px 8px;border-radius:10px;border:1px solid ${act?"var(--amber)":"var(--line)"};background:${act?"var(--amber)":"transparent"};color:${act?"var(--amber-ink)":"var(--dim)"}">
+      <div style="font-weight:800;font-size:14px">Dia ${d} · ${esc(t.label)}</div>
+      <div style="font-size:10.5px;opacity:.85;margin-top:1px">${esc(t.sub)} · ${esc(t.days)}</div></button>`;
+  }
+  h+=`</div>`;
+
+  h+=`<div style="margin-top:16px">
+    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--dim);margin-bottom:6px">
+      <span style="letter-spacing:1.5px;text-transform:uppercase">Trabalho de hoje</span>
+      <span class="mono">${doneSets}/${totalSets} séries · ${pct}%</span></div>
+    <div style="height:6px;background:var(--surface2);border-radius:99px;overflow:hidden">
+      <div style="width:${pct}%;height:100%;background:var(--amber);border-radius:99px;transition:width .3s ease"></div></div></div>`;
+
+  h+=`<section class="card" style="margin-top:18px;overflow:hidden">
+    <button onclick="warmOpen=!warmOpen;render()" style="width:100%;display:flex;justify-content:space-between;align-items:center;padding:13px 15px;background:transparent;border:none;color:var(--text)">
+      <span style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:11px;letter-spacing:2px;color:var(--dim);text-transform:uppercase">Aquecimento</span>
+        <span class="mono" style="font-size:11px;color:var(--faint)">~5 min · 16 kg</span></span>
+      <span style="color:var(--dim);font-size:13px">${warmOpen?"▾":"▸"}</span></button>`;
+  if(warmOpen){
+    h+=`<div style="padding:0 8px 8px">`;
+    warm.forEach((m,i)=>{
+      const on=!!checks[`${day}|wu|${i}`];
+      h+=`<button onclick="toggleWarm(${i})" style="width:100%;text-align:left;display:flex;gap:11px;align-items:flex-start;padding:9px 8px;background:transparent;border:none;${i?"border-top:1px solid var(--line);":""}color:var(--text)">
+        <span style="margin-top:1px;width:18px;height:18px;border-radius:5px;flex-shrink:0;border:1.5px solid ${on?"var(--amber)":"var(--faint)"};background:${on?"var(--amber)":"transparent"};color:var(--amber-ink);font-size:12px;line-height:15px;text-align:center;font-weight:800">${on?"✓":""}</span>
+        <span style="flex:1"><span style="display:flex;justify-content:space-between;gap:8px">
+          <span style="font-weight:600;font-size:14px;opacity:${on?".5":"1"};text-decoration:${on?"line-through":"none"}">${esc(m.name)}</span>
+          <span class="mono" style="font-size:12.5px;color:var(--amber);white-space:nowrap">${esc(m.dose)}</span></span>
+          <span style="display:block;font-size:11.5px;color:var(--faint);margin-top:2px;line-height:1.45">${esc(m.desc)}</span></span></button>`;
+    });
+    h+=`</div>`;
+  }
+  h+=`</section>`;
+
+  h+=`<div style="margin-top:18px;display:flex;flex-direction:column;gap:12px">`;
+  tpl.ex.forEach((ex,idx)=>{
+    const w=weights[ex.id]??ex.w;
+    const marks=Array.from({length:ex.sets},(_,i)=>!!checks[`${day}|${ex.id}|${i}`]);
+    const exDone=marks.every(Boolean);
+    const nextIdx=marks.findIndex(v=>!v);
+    h+=`<section class="card" style="border-color:${exDone?"var(--amber)":"var(--line)"};padding:15px;opacity:${exDone?".78":"1"}">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px">
+        <div style="display:flex;align-items:baseline;gap:8px">
+          <span class="mono" style="font-size:12px;color:var(--faint)">${String(idx+1).padStart(2,"0")}</span>
+          <h2 style="margin:0;font-size:16.5px;font-weight:700;letter-spacing:-0.3px">${esc(ex.name)}</h2></div>
+        <span class="mono" style="font-size:12.5px;color:var(--dim);white-space:nowrap">${ex.sets} × ${esc(ex.reps)}</span></div>`;
+    if(ex.note)h+=`<p style="margin:9px 0 0;font-size:12px;color:var(--amber);line-height:1.5;background:rgba(238,123,48,.08);border:1px solid rgba(238,123,48,.2);border-radius:9px;padding:8px 10px">${esc(ex.note)}</p>`;
+    h+=`<div style="margin-top:13px;display:flex;flex-wrap:wrap;align-items:center;gap:14px;justify-content:space-between">
+      <div style="display:flex;align-items:center;gap:8px">
+        <button onclick="stepW('${ex.id}',${ex.w},-2)" style="width:34px;height:34px;border-radius:9px;border:1px solid var(--line);background:transparent;color:var(--text);font-size:19px;line-height:1">–</button>
+        <div style="text-align:center;min-width:52px">
+          <div class="mono" style="font-size:22px;font-weight:700;line-height:1">${w}<span style="font-size:11px;color:var(--dim);font-weight:400"> kg</span></div>
+          <div style="font-size:9.5px;color:var(--faint);margin-top:2px">plano: ${esc(ex.hint)}</div></div>
+        <button onclick="stepW('${ex.id}',${ex.w},2)" style="width:34px;height:34px;border-radius:9px;border:1px solid var(--line);background:transparent;color:var(--text);font-size:19px;line-height:1">+</button></div>
+      <div style="display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end">`;
+    marks.forEach((on,i)=>{
+      const isNext=!on&&i===nextIdx;
+      h+=`<button onclick="toggleSet('${ex.id}',${ex.rest},'${esc(ex.name)}',${i})" aria-label="Série ${i+1}${on?" feita":""}"
+        style="width:42px;height:42px;border-radius:11px;font-size:15px;font-weight:700;color:${on?"var(--amber-ink)":isNext?"var(--amber)":"var(--dim)"};background:${on?"var(--amber)":"transparent"};border:1.5px solid ${on||isNext?"var(--amber)":"var(--line)"};box-shadow:${isNext?"0 0 0 3px rgba(238,123,48,.13)":"none"}" class="mono">${on?"✓":i+1}</button>`;
+    });
+    h+=`</div></div>
+      <div class="mono" style="margin-top:9px;font-size:10.5px;color:var(--faint)">descanso ${ex.rest}s entre séries</div></section>`;
+  });
+  h+=`</div>`;
+
+  const canFinish=doneSets>0&&!finalized;
+  h+=`<div style="margin-top:20px">
+    <button onclick="finalizeSession()" ${canFinish&&!uploading?"":"disabled"}
+      style="width:100%;padding:16px;border-radius:14px;font-size:16px;font-weight:800;border:1px solid ${finalized?"var(--ok)":"var(--amber)"};
+      background:${finalized?"transparent":canFinish?"var(--amber)":"var(--surface2)"};
+      color:${finalized?"var(--ok)":canFinish?"var(--amber-ink)":"var(--faint)"};opacity:${uploading?".6":"1"}">
+      ${finalized?"✓ Registrado no coach-os":uploading?"Enviando…":"Finalizar treino → registrar"}</button>
+    ${store.get("pending-session")?`<button onclick="retryPending()" style="width:100%;margin-top:8px;padding:11px;border-radius:10px;border:1px solid var(--err);background:transparent;color:var(--err);font-size:13px">↻ Reenviar sessão pendente</button>`:""}
+  </div>`;
+
+  h+=`<section class="card" style="margin-top:20px;padding:14px 16px">
+    <div style="font-size:11px;letter-spacing:2px;color:var(--dim);text-transform:uppercase;margin-bottom:10px">Inegociáveis</div>`;
+  (PLAN.regras||[]).forEach((t,i)=>{
+    h+=`<div style="display:flex;gap:10px;align-items:flex-start;margin-top:${i?8:0}px">
+      <span class="mono" style="color:var(--amber);font-size:12px;margin-top:1px">${i+1}</span>
+      <span style="font-size:13px;line-height:1.45">${esc(t)}</span></div>`;
+  });
+  h+=`</section>
+  <p style="text-align:center;font-size:11px;color:var(--faint);margin-top:22px;line-height:1.6;font-style:italic">
+    Treino é processo, não evento.<br>Ataca o corpo igual ataca o negócio: com dados.</p>`;
+
+  document.getElementById("app").innerHTML=h;
+}
+
+function renderTimer(){
+  const el=document.getElementById("timerbar");
+  if(!timer){el.innerHTML="";return;}
+  const rem=Math.max(0,Math.round((timer.endsAt-Date.now())/1000));
+  el.innerHTML=`<div style="position:fixed;left:0;right:0;bottom:0;z-index:50;padding:0 12px 12px">
+    <div style="max-width:620px;margin:0 auto;background:var(--surface2);border:1px solid var(--amber);border-radius:16px;padding:12px 14px;box-shadow:0 -8px 30px rgba(0,0,0,.5)">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+        <div style="min-width:0">
+          <div style="font-size:10px;letter-spacing:2px;color:var(--amber);text-transform:uppercase;font-weight:700">Descanso</div>
+          <div style="font-size:12.5px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(timer.label)}</div></div>
+        <div class="mono" style="font-size:40px;font-weight:800;line-height:1;letter-spacing:-1px;color:${rem<=5?"var(--amber)":"var(--text)"}">${fmt(rem)}</div>
+        <div style="display:flex;gap:7px">
+          <button onclick="timer.endsAt+=15000;timer.total+=15;renderTimer()" style="padding:9px 12px;border-radius:10px;border:1px solid var(--line);background:transparent;color:var(--text);font-size:13px;font-weight:600;white-space:nowrap">+15s</button>
+          <button onclick="stopTimer()" style="padding:9px 12px;border-radius:10px;border:1px solid var(--amber);background:var(--amber);color:var(--amber-ink);font-size:13px;font-weight:800;white-space:nowrap">Pular</button></div></div>
+      <div style="height:5px;background:var(--surface);border-radius:99px;overflow:hidden;margin-top:11px">
+        <div style="width:${(rem/timer.total)*100}%;height:100%;background:var(--amber);border-radius:99px;transition:width .25s linear"></div></div></div></div>`;
+}
+
+// ── arranque ──
+loadSession();
+render();
+fetchPlan();
+retryPending();
+</script>
+</body>
+</html>
