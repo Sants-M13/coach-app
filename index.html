@@ -23,6 +23,8 @@
   input{background:var(--surface2); border:1px solid var(--line); color:var(--text); border-radius:10px;
     padding:11px 12px; font-size:14px; width:100%}
   input:focus{outline:none; border-color:var(--amber)}
+  .demo2{animation:fx 1.7s steps(1) infinite}
+  @keyframes fx{0%{opacity:0}50%{opacity:1}100%{opacity:0}}
 </style>
 </head>
 <body>
@@ -34,33 +36,35 @@
 // Prioridade do treino exibido: treino/hoje.json (montado pelo coach) →
 // template do dia da semana em treino/planos/current.json → fallback embutido.
 // Sessão finalizada → commit em treino/logs/AAAA-MM/AAAA-MM-DD-<slug>.json
-// GIFs de demonstração: ExerciseDB OSS (exercisedb.dev) — uso pessoal, com atribuição.
+// Demonstrações: free-exercise-db (domínio público) — pares de foto animados (posição inicial ↔ final).
+// campo demo: ["Dir/0.jpg","Dir/1.jpg"] (relativo à RAW) ou URL http completa.
 const OWNER="Sants-M13", REPO="coach-os", API="https://api.github.com";
-const EDB="https://oss.exercisedb.dev/api/v1/exercises";
+const RAW="https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/";
+const RAW_DB="https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/dist/exercises.json";
 
 const FALLBACK_PLAN={
   plano:"A — KB puro (fase de aprendizado)",
   warmup:[
     {name:"Halo",dose:"5 / direção",desc:"KB circula em volta da cabeça, perto. Acorda o ombro."},
-    {name:"Figure 8",dose:"30 s",desc:"Desenha um 8 entre as pernas, mão em mão. Hinge, costas retas.",gif:"https://static.exercisedb.dev/media/L4ay0PW.gif"},
+    {name:"Figure 8",dose:"30 s",desc:"Desenha um 8 entre as pernas, mão em mão. Hinge, costas retas.",demo:["Kettlebell_Figure_8/0.jpg","Kettlebell_Figure_8/1.jpg"]},
     {name:"Around the world",dose:"5 / direção",desc:"Volta na cintura, mão em mão atrás. Tronco parado, só o KB gira."},
-    {name:"Goblet squat",dose:"5 lentos",desc:"Embaixo do queixo, desce controlado.",gif:"https://static.exercisedb.dev/media/ZA8b5hc.gif"},
-    {name:"Swing leve",dose:"10",desc:"Ativa o hinge antes do trabalho pesado.",gif:"https://static.exercisedb.dev/media/UHJlbu3.gif"}],
+    {name:"Goblet squat",dose:"5 lentos",desc:"Embaixo do queixo, desce controlado.",demo:["Goblet_Squat/0.jpg","Goblet_Squat/1.jpg"]},
+    {name:"Swing leve",dose:"10",desc:"Ativa o hinge antes do trabalho pesado.",demo:["One-Arm_Kettlebell_Swings/0.jpg","One-Arm_Kettlebell_Swings/1.jpg"]}],
   warmup_b_extra:[
     {name:"Círculos de ombro",dose:"10 / lado",desc:"Ombro precisa acordar mais — tem get-up e press hoje."},
     {name:"Get-up parcial vazio",dose:"3 / lado",desc:"Só até o cotovelo e volta. Sem peso."}],
   templates:{
     A:{label:"Balístico",sub:"hinge + potência",days:"Seg · Qui",ex:[
-      {id:"swing1",name:"KB Swing",w:24,hint:"24 kg",sets:5,reps:"10",rest:75,gif:"https://static.exercisedb.dev/media/UHJlbu3.gif"},
-      {id:"goblet",name:"Goblet squat",w:16,hint:"16 → 24 kg",sets:4,reps:"8",rest:60,gif:"https://static.exercisedb.dev/media/ZA8b5hc.gif"},
-      {id:"clean",name:"Clean unilateral",w:16,hint:"16 kg",sets:3,reps:"5 / lado",rest:60,gif:"https://static.exercisedb.dev/media/LHWF7us.gif"},
-      {id:"swing2",name:"KB Swing — fechar",w:24,hint:"24 kg",sets:3,reps:"10",rest:75,gif:"https://static.exercisedb.dev/media/UHJlbu3.gif"}]},
+      {id:"swing1",name:"KB Swing",w:24,hint:"24 kg",sets:5,reps:"10",rest:75,demo:["One-Arm_Kettlebell_Swings/0.jpg","One-Arm_Kettlebell_Swings/1.jpg"]},
+      {id:"goblet",name:"Goblet squat",w:16,hint:"16 → 24 kg",sets:4,reps:"8",rest:60,demo:["Goblet_Squat/0.jpg","Goblet_Squat/1.jpg"]},
+      {id:"clean",name:"Clean unilateral",w:16,hint:"16 kg",sets:3,reps:"5 / lado",rest:60,demo:["One-Arm_Kettlebell_Clean/0.jpg","One-Arm_Kettlebell_Clean/1.jpg"]},
+      {id:"swing2",name:"KB Swing — fechar",w:24,hint:"24 kg",sets:3,reps:"10",rest:75,demo:["One-Arm_Kettlebell_Swings/0.jpg","One-Arm_Kettlebell_Swings/1.jpg"]}]},
     B:{label:"Grind",sub:"técnica + força lenta",days:"Ter · Sex",ex:[
-      {id:"getup",name:"Turkish get-up",w:16,hint:"16 kg ou vazio",sets:5,reps:"1 / lado",rest:90,gif:"https://static.exercisedb.dev/media/Ha7SZ3y.gif",
+      {id:"getup",name:"Turkish get-up",w:16,hint:"16 kg ou vazio",sets:5,reps:"1 / lado",rest:90,demo:["Kettlebell_Turkish_Get-Up_Squat_style/0.jpg","Kettlebell_Turkish_Get-Up_Squat_style/1.jpg"],
        note:"Progressão: punho vazio → garrafinha no punho → 16 kg só quando o padrão sair fluido. Não força."},
-      {id:"press",name:"Military press unilateral",w:16,hint:"16 kg",sets:4,reps:"5 / lado",rest:75,gif:"https://static.exercisedb.dev/media/5KLbZWx.gif"},
-      {id:"row",name:"Single-arm row",w:24,hint:"24 kg",sets:4,reps:"8 / lado",rest:60,gif:"https://static.exercisedb.dev/media/g9AsZ8P.gif"},
-      {id:"gobletB",name:"Goblet squat",w:16,hint:"16 kg",sets:3,reps:"10",rest:60,gif:"https://static.exercisedb.dev/media/ZA8b5hc.gif"}]}},
+      {id:"press",name:"Military press unilateral",w:16,hint:"16 kg",sets:4,reps:"5 / lado",rest:75,demo:["Alternating_Kettlebell_Press/0.jpg","Alternating_Kettlebell_Press/1.jpg"]},
+      {id:"row",name:"Single-arm row",w:24,hint:"24 kg",sets:4,reps:"8 / lado",rest:60,demo:["One-Arm_Kettlebell_Row/0.jpg","One-Arm_Kettlebell_Row/1.jpg"]},
+      {id:"gobletB",name:"Goblet squat",w:16,hint:"16 kg",sets:3,reps:"10",rest:60,demo:["Goblet_Squat/0.jpg","Goblet_Squat/1.jpg"]}]}},
   regras:["Nunca à falha — deixa 2-3 reps no tanque","Anota a carga — busca +1 rep ou +carga toda semana","Proteína ~180 g no dia · déficit moderado"]
 };
 
@@ -164,35 +168,40 @@ async function fetchPlan(){
   render();
 }
 
-// ── GIF (ExerciseDB OSS) ──
-function toggleGif(id,name,gif){
+// ── Demonstração (free-exercise-db, domínio público) ──
+let _DEMOS={}, EXDB=null;
+function toggleGif(id,name){
   gifOpen[id]=!gifOpen[id];
-  if(gifOpen[id]&&!gif&&gifCache[id]===undefined)searchGif(id,name);
+  if(gifOpen[id]&&!_DEMOS[id]&&gifCache[id]===undefined)searchDemo(id,name);
   render();
 }
-async function searchGif(id,name){
+async function searchDemo(id,name){
   gifCache[id]="loading";
   try{
-    const r=await fetch(`${EDB}?name=${encodeURIComponent(name)}&limit=50`);
-    const d=(await r.json()).data||[];
-    const toks=name.toLowerCase().replace(/[—–-]/g," ").split(/\s+/).filter(Boolean);
+    if(!EXDB){const r=await fetch(RAW_DB);EXDB=await r.json();}
+    const toks=name.toLowerCase().replace(/[—–-]/g," ").replace(/\bkb\b/g,"kettlebell").split(/\s+/).filter(Boolean);
     let best=null,bs=0;
-    for(const e of d){
+    for(const e of EXDB){
       const n=e.name.toLowerCase();
       const s=toks.filter(t=>n.includes(t)).length;
       if(s>bs){bs=s;best=e;}
     }
-    gifCache[id]=(best&&bs>=Math.max(1,toks.length-1))?best.gifUrl:"none";
+    gifCache[id]=(best&&best.images&&bs>=Math.ceil(toks.length/2))?best.images:"none";
   }catch(e){gifCache[id]="none";}
   render();
 }
-function gifBlock(id,gif){
+function gifBlock(id){
   if(!gifOpen[id])return"";
-  const src=gif||gifCache[id];
-  if(src==="loading"||src===undefined)return`<div style="margin-top:10px;font-size:12px;color:var(--faint)">buscando demonstração…</div>`;
-  if(src==="none")return`<div style="margin-top:10px;font-size:12px;color:var(--faint)">demonstração não encontrada</div>`;
+  const d=_DEMOS[id]||gifCache[id];
+  if(d==="loading"||d===undefined)return`<div style="margin-top:10px;font-size:12px;color:var(--faint)">buscando demonstração…</div>`;
+  if(d==="none")return`<div style="margin-top:10px;font-size:12px;color:var(--faint)">demonstração não encontrada</div>`;
+  const urls=(Array.isArray(d)?d:[d]).map(u=>/^https?:/.test(u)?u:RAW+u);
+  if(urls.length>1)return`<div style="margin-top:10px;border-radius:10px;overflow:hidden;border:1px solid var(--line);background:#fff;position:relative">
+      <img src="${urls[0]}" alt="posição inicial" style="width:100%;display:block" loading="lazy">
+      <img src="${urls[1]}" alt="posição final" class="demo2" style="position:absolute;left:0;top:0;width:100%" loading="lazy">
+    </div><div class="mono" style="margin-top:4px;font-size:10px;color:var(--faint)">posição inicial ↔ final</div>`;
   return`<div style="margin-top:10px;border-radius:10px;overflow:hidden;border:1px solid var(--line);background:#fff">
-    <img src="${src}" alt="demonstração do movimento" style="width:100%;display:block" loading="lazy"></div>`;
+    <img src="${urls[0]}" alt="demonstração do movimento" style="width:100%;display:block" loading="lazy"></div>`;
 }
 
 // ── sessão → coach-os ──
@@ -272,6 +281,9 @@ function toast(msg,kind){
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 function render(){
   const v=currentView();
+  _DEMOS={};
+  v.warmup.forEach((m,i)=>{if(m.demo||m.gif)_DEMOS["wu"+i]=m.demo||m.gif;});
+  v.ex.forEach(ex=>{if(ex.demo||ex.gif)_DEMOS[ex.id]=ex.demo||ex.gif;});
   const totalSets=v.ex.reduce((a,e)=>a+e.sets,0);
   const doneSets=v.ex.reduce((a,e)=>a+Array.from({length:e.sets}).filter((_,i)=>checks[`${day}|${e.id}|${i}`]).length,0);
   const pct=totalSets?Math.round(doneSets/totalSets*100):0;
@@ -349,7 +361,7 @@ function render(){
           <span style="font-weight:600;font-size:14px;opacity:${on?".5":"1"};text-decoration:${on?"line-through":"none"}">${esc(m.name)}</span>
           <span class="mono" style="font-size:12.5px;color:var(--amber);white-space:nowrap">${esc(m.dose)}</span></span>
           <span style="display:block;font-size:11.5px;color:var(--faint);margin-top:2px;line-height:1.45">${esc(m.desc)}</span></span></button>
-        ${m.gif?`<div style="padding:0 8px 8px 37px"><button onclick="toggleGif('wu${i}',null,'${m.gif}')" style="background:transparent;border:none;color:var(--faint);font-size:11px;padding:0">${gifOpen["wu"+i]?"▾ esconder movimento":"▸ ver movimento"}</button>${gifBlock("wu"+i,m.gif)}</div>`:""}
+        ${_DEMOS["wu"+i]?`<div style="padding:0 8px 8px 37px"><button onclick="toggleGif('wu${i}','${esc(m.name)}')" style="background:transparent;border:none;color:var(--faint);font-size:11px;padding:0">${gifOpen["wu"+i]?"▾ esconder movimento":"▸ ver movimento"}</button>${gifBlock("wu"+i)}</div>`:""}
       </div>`;
     });
     h+=`</div>`;
@@ -364,11 +376,11 @@ function render(){
     const nextIdx=marks.findIndex(x=>!x);
     h+=`<section class="card" style="border-color:${exDone?"var(--amber)":"var(--line)"};padding:15px;opacity:${exDone?".78":"1"}">
       <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px">
-        <button onclick="toggleGif('${ex.id}','${esc(ex.name)}',${ex.gif?`'${ex.gif}'`:"null"})" style="display:flex;align-items:baseline;gap:8px;background:transparent;border:none;color:var(--text);padding:0;text-align:left">
+        <button onclick="toggleGif('${ex.id}','${esc(ex.name)}')" style="display:flex;align-items:baseline;gap:8px;background:transparent;border:none;color:var(--text);padding:0;text-align:left">
           <span class="mono" style="font-size:12px;color:var(--faint)">${String(idx+1).padStart(2,"0")}</span>
           <h2 style="margin:0;font-size:16.5px;font-weight:700;letter-spacing:-0.3px">${esc(ex.name)} <span style="color:var(--faint);font-size:12px;font-weight:400">${gifOpen[ex.id]?"▾":"▸"}</span></h2></button>
         <span class="mono" style="font-size:12.5px;color:var(--dim);white-space:nowrap">${ex.sets} × ${esc(ex.reps)}</span></div>
-      ${gifBlock(ex.id,ex.gif)}`;
+      ${gifBlock(ex.id)}`;
     if(ex.note)h+=`<p style="margin:9px 0 0;font-size:12px;color:var(--amber);line-height:1.5;background:rgba(238,123,48,.08);border:1px solid rgba(238,123,48,.2);border-radius:9px;padding:8px 10px">${esc(ex.note)}</p>`;
     h+=`<div style="margin-top:13px;display:flex;flex-wrap:wrap;align-items:center;gap:14px;justify-content:space-between">
       <div style="display:flex;align-items:center;gap:8px">
@@ -408,7 +420,7 @@ function render(){
   h+=`</section>
   <p style="text-align:center;font-size:11px;color:var(--faint);margin-top:22px;line-height:1.6;font-style:italic">
     Treino é processo, não evento.<br>Ataca o corpo igual ataca o negócio: com dados.</p>
-  <p style="text-align:center;font-size:10px;color:var(--faint);margin-top:8px">GIFs de demonstração: ExerciseDB · exercisedb.dev</p>`;
+  <p style="text-align:center;font-size:10px;color:var(--faint);margin-top:8px">Demonstrações: free-exercise-db (domínio público)</p>`;
 
   document.getElementById("app").innerHTML=h;
 }
