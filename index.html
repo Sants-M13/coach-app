@@ -31,42 +31,45 @@
 <div id="toast" style="position:fixed;top:12px;left:12px;right:12px;z-index:60;display:none"></div>
 <script>
 // ── coach-app · superfície de captura do coach-os ──────────────────────
-// Plano vem de Sants-M13/coach-os/treino/planos/current.json (privado, via PAT)
-// Sessão finalizada → commit em treino/logs/AAAA-MM/AAAA-MM-DD-<dia>.json
+// Prioridade do treino exibido: treino/hoje.json (montado pelo coach) →
+// template do dia da semana em treino/planos/current.json → fallback embutido.
+// Sessão finalizada → commit em treino/logs/AAAA-MM/AAAA-MM-DD-<slug>.json
+// GIFs de demonstração: ExerciseDB OSS (exercisedb.dev) — uso pessoal, com atribuição.
 const OWNER="Sants-M13", REPO="coach-os", API="https://api.github.com";
+const EDB="https://oss.exercisedb.dev/api/v1/exercises";
 
-// Fallback embutido (usado sem token / sem rede) — espelho do current.json
 const FALLBACK_PLAN={
   plano:"A — KB puro (fase de aprendizado)",
   warmup:[
     {name:"Halo",dose:"5 / direção",desc:"KB circula em volta da cabeça, perto. Acorda o ombro."},
-    {name:"Figure 8",dose:"30 s",desc:"Desenha um 8 entre as pernas, mão em mão. Hinge, costas retas."},
+    {name:"Figure 8",dose:"30 s",desc:"Desenha um 8 entre as pernas, mão em mão. Hinge, costas retas.",gif:"https://static.exercisedb.dev/media/L4ay0PW.gif"},
     {name:"Around the world",dose:"5 / direção",desc:"Volta na cintura, mão em mão atrás. Tronco parado, só o KB gira."},
-    {name:"Goblet squat",dose:"5 lentos",desc:"Embaixo do queixo, desce controlado."},
-    {name:"Swing leve",dose:"10",desc:"Ativa o hinge antes do trabalho pesado."}],
+    {name:"Goblet squat",dose:"5 lentos",desc:"Embaixo do queixo, desce controlado.",gif:"https://static.exercisedb.dev/media/ZA8b5hc.gif"},
+    {name:"Swing leve",dose:"10",desc:"Ativa o hinge antes do trabalho pesado.",gif:"https://static.exercisedb.dev/media/UHJlbu3.gif"}],
   warmup_b_extra:[
     {name:"Círculos de ombro",dose:"10 / lado",desc:"Ombro precisa acordar mais — tem get-up e press hoje."},
     {name:"Get-up parcial vazio",dose:"3 / lado",desc:"Só até o cotovelo e volta. Sem peso."}],
   templates:{
     A:{label:"Balístico",sub:"hinge + potência",days:"Seg · Qui",ex:[
-      {id:"swing1",name:"KB Swing",w:24,hint:"24 kg",sets:5,reps:"10",rest:75},
-      {id:"goblet",name:"Goblet squat",w:16,hint:"16 → 24 kg",sets:4,reps:"8",rest:60},
-      {id:"clean",name:"Clean unilateral",w:16,hint:"16 kg",sets:3,reps:"5 / lado",rest:60},
-      {id:"swing2",name:"KB Swing — fechar",w:24,hint:"24 kg",sets:3,reps:"10",rest:75}]},
+      {id:"swing1",name:"KB Swing",w:24,hint:"24 kg",sets:5,reps:"10",rest:75,gif:"https://static.exercisedb.dev/media/UHJlbu3.gif"},
+      {id:"goblet",name:"Goblet squat",w:16,hint:"16 → 24 kg",sets:4,reps:"8",rest:60,gif:"https://static.exercisedb.dev/media/ZA8b5hc.gif"},
+      {id:"clean",name:"Clean unilateral",w:16,hint:"16 kg",sets:3,reps:"5 / lado",rest:60,gif:"https://static.exercisedb.dev/media/LHWF7us.gif"},
+      {id:"swing2",name:"KB Swing — fechar",w:24,hint:"24 kg",sets:3,reps:"10",rest:75,gif:"https://static.exercisedb.dev/media/UHJlbu3.gif"}]},
     B:{label:"Grind",sub:"técnica + força lenta",days:"Ter · Sex",ex:[
-      {id:"getup",name:"Turkish get-up",w:16,hint:"16 kg ou vazio",sets:5,reps:"1 / lado",rest:90,
+      {id:"getup",name:"Turkish get-up",w:16,hint:"16 kg ou vazio",sets:5,reps:"1 / lado",rest:90,gif:"https://static.exercisedb.dev/media/Ha7SZ3y.gif",
        note:"Progressão: punho vazio → garrafinha no punho → 16 kg só quando o padrão sair fluido. Não força."},
-      {id:"press",name:"Military press unilateral",w:16,hint:"16 kg",sets:4,reps:"5 / lado",rest:75},
-      {id:"row",name:"Single-arm row",w:24,hint:"24 kg",sets:4,reps:"8 / lado",rest:60},
-      {id:"gobletB",name:"Goblet squat",w:16,hint:"16 kg",sets:3,reps:"10",rest:60}]}},
+      {id:"press",name:"Military press unilateral",w:16,hint:"16 kg",sets:4,reps:"5 / lado",rest:75,gif:"https://static.exercisedb.dev/media/5KLbZWx.gif"},
+      {id:"row",name:"Single-arm row",w:24,hint:"24 kg",sets:4,reps:"8 / lado",rest:60,gif:"https://static.exercisedb.dev/media/g9AsZ8P.gif"},
+      {id:"gobletB",name:"Goblet squat",w:16,hint:"16 kg",sets:3,reps:"10",rest:60,gif:"https://static.exercisedb.dev/media/ZA8b5hc.gif"}]}},
   regras:["Nunca à falha — deixa 2-3 reps no tanque","Anota a carga — busca +1 rep ou +carga toda semana","Proteína ~180 g no dia · déficit moderado"]
 };
 
 // ── estado ──
-let PLAN=FALLBACK_PLAN, planSource="embutido";
+let PLAN=FALLBACK_PLAN, HOJE=null, planSource="embutido";
 let day=null, checks={}, weights={}, warmOpen=true, startedAt=null, finalized=false;
 let timer=null, timerInterval=null, wakeLock=null, timerFired=false;
 let showConfig=false, uploading=false;
+let gifOpen={}, gifCache={};
 
 const todayStr=()=>new Date().toLocaleDateString("en-CA");
 const fmt=s=>`${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`;
@@ -75,18 +78,22 @@ const store={get:k=>{try{return localStorage.getItem(k)}catch(e){return null}},
              del:k=>{try{localStorage.removeItem(k)}catch(e){}}};
 const token=()=>store.get("gh-token")||"";
 
-function defaultDay(){
-  const map={1:"A",2:"B",4:"A",5:"B"};
-  return map[new Date().getDay()]||"A";
+function weekdayDay(){const map={1:"A",2:"B",4:"A",5:"B"};return map[new Date().getDay()]||"A";}
+function currentView(){
+  if(day==="HOJE"&&HOJE)return{label:HOJE.titulo||"Treino de hoje",sub:HOJE.sub||"",ex:HOJE.ex||[],
+    warmup:HOJE.warmup||PLAN.warmup,nota:HOJE.nota_coach||null};
+  const t=PLAN.templates[day]||PLAN.templates.A;
+  const warm=day==="B"?[...PLAN.warmup,...(PLAN.warmup_b_extra||[])]:PLAN.warmup;
+  return{label:`Dia ${day} · ${t.label}`,sub:(t.sub||"")+" · "+(t.days||""),ex:t.ex,warmup:warm,nota:null};
 }
 
 function loadSession(){
   weights=JSON.parse(store.get("kb-weights")||"{}");
   try{
     const s=JSON.parse(store.get("kb-session")||"null");
-    if(s&&s.date===todayStr()){checks=s.checks||{};day=s.day||defaultDay();startedAt=s.startedAt||null;finalized=!!s.finalized;}
-    else{day=defaultDay();}
-  }catch(e){day=defaultDay();}
+    if(s&&s.date===todayStr()){checks=s.checks||{};day=s.day||weekdayDay();startedAt=s.startedAt||null;finalized=!!s.finalized;}
+    else{day=weekdayDay();}
+  }catch(e){day=weekdayDay();}
 }
 function saveSession(){
   store.set("kb-weights",JSON.stringify(weights));
@@ -134,47 +141,93 @@ async function gh(path,opts={}){
 const b64=s=>btoa(unescape(encodeURIComponent(s)));
 const unb64=s=>decodeURIComponent(escape(atob(s)));
 
+async function fetchRepoJson(path){
+  const r=await gh(`/repos/${OWNER}/${REPO}/contents/${path}`);
+  if(r.status===404)return null;
+  const j=await r.json();
+  return JSON.parse(unb64(j.content.replace(/\n/g,"")));
+}
 async function fetchPlan(){
   if(!token())return;
   try{
-    const r=await gh(`/repos/${OWNER}/${REPO}/contents/treino/planos/current.json`);
-    if(r.status===404)return;
-    const j=await r.json();
-    const p=JSON.parse(unb64(j.content.replace(/\n/g,"")));
-    if(p.templates){PLAN=p;planSource="coach-os";render();}
+    const p=await fetchRepoJson("treino/planos/current.json");
+    if(p&&p.templates){PLAN=p;planSource="coach-os";}
   }catch(e){}
+  try{
+    const h=await fetchRepoJson("treino/hoje.json");
+    if(h&&h.data===todayStr()&&Array.isArray(h.ex)&&h.ex.length){
+      HOJE=h;planSource="coach-os";
+      const hadChecks=Object.keys(checks).some(k=>checks[k]);
+      if(!hadChecks)day="HOJE";
+    }
+  }catch(e){}
+  render();
 }
 
+// ── GIF (ExerciseDB OSS) ──
+function toggleGif(id,name,gif){
+  gifOpen[id]=!gifOpen[id];
+  if(gifOpen[id]&&!gif&&gifCache[id]===undefined)searchGif(id,name);
+  render();
+}
+async function searchGif(id,name){
+  gifCache[id]="loading";
+  try{
+    const r=await fetch(`${EDB}?name=${encodeURIComponent(name)}&limit=50`);
+    const d=(await r.json()).data||[];
+    const toks=name.toLowerCase().replace(/[—–-]/g," ").split(/\s+/).filter(Boolean);
+    let best=null,bs=0;
+    for(const e of d){
+      const n=e.name.toLowerCase();
+      const s=toks.filter(t=>n.includes(t)).length;
+      if(s>bs){bs=s;best=e;}
+    }
+    gifCache[id]=(best&&bs>=Math.max(1,toks.length-1))?best.gifUrl:"none";
+  }catch(e){gifCache[id]="none";}
+  render();
+}
+function gifBlock(id,gif){
+  if(!gifOpen[id])return"";
+  const src=gif||gifCache[id];
+  if(src==="loading"||src===undefined)return`<div style="margin-top:10px;font-size:12px;color:var(--faint)">buscando demonstração…</div>`;
+  if(src==="none")return`<div style="margin-top:10px;font-size:12px;color:var(--faint)">demonstração não encontrada</div>`;
+  return`<div style="margin-top:10px;border-radius:10px;overflow:hidden;border:1px solid var(--line);background:#fff">
+    <img src="${src}" alt="demonstração do movimento" style="width:100%;display:block" loading="lazy"></div>`;
+}
+
+// ── sessão → coach-os ──
 function buildSessionJson(){
-  const tpl=PLAN.templates[day];
-  const exercicios=tpl.ex.map(ex=>{
+  const v=currentView();
+  const exercicios=v.ex.map(ex=>{
     const done=Array.from({length:ex.sets}).filter((_,i)=>checks[`${day}|${ex.id}|${i}`]).length;
     return {exercicio:ex.name,carga_kg:weights[ex.id]??ex.w,series_plano:ex.sets,series_feitas:done,reps_alvo:ex.reps,descanso_s:ex.rest};
   });
-  const warm=warmList();
-  const warmDone=warm.filter((_,i)=>checks[`${day}|wu|${i}`]).length;
+  const warmDone=v.warmup.filter((_,i)=>checks[`${day}|wu|${i}`]).length;
   const dur=startedAt?Math.round((Date.now()-startedAt)/60000):null;
   return {
-    data:todayStr(),plano:PLAN.plano||"",template:day+" — "+tpl.label,
-    aquecimento:`${warmDone}/${warm.length}`,duracao_min:dur,
+    data:todayStr(),plano:PLAN.plano||"",template:v.label,
+    origem_treino:day==="HOJE"?((HOJE&&HOJE.origem)||"coach (hoje.json)"):"template "+day,
+    aquecimento:`${warmDone}/${v.warmup.length}`,duracao_min:dur,
     exercicios,origem:"coach-app",registrado_em:new Date().toISOString()
   };
 }
-
+async function putJson(path,obj,msg){
+  let sha;
+  const head=await gh(`/repos/${OWNER}/${REPO}/contents/${path}`);
+  if(head.status!==404){sha=(await head.json()).sha;}
+  const body={message:msg,content:b64(JSON.stringify(obj,null,2))};
+  if(sha)body.sha=sha;
+  const put=await gh(`/repos/${OWNER}/${REPO}/contents/${path}`,{method:"PUT",body:JSON.stringify(body)});
+  if(!put.ok)throw new Error("PUT "+put.status);
+}
 async function finalizeSession(){
   if(!token()){showConfig=true;render();toast("Configura o token do GitHub primeiro (⚙).","err");return;}
   uploading=true;render();
   const s=buildSessionJson();
-  const ym=s.data.slice(0,7);
-  const path=`treino/logs/${ym}/${s.data}-${day.toLowerCase()}.json`;
+  const slug=day==="HOJE"?"hoje":day.toLowerCase();
+  const path=`treino/logs/${s.data.slice(0,7)}/${s.data}-${slug}.json`;
   try{
-    let sha;
-    const head=await gh(`/repos/${OWNER}/${REPO}/contents/${path}`);
-    if(head.status!==404){sha=(await head.json()).sha;}
-    const body={message:`treino: sessão ${day} ${s.data} (coach-app)`,content:b64(JSON.stringify(s,null,2))};
-    if(sha)body.sha=sha;
-    const put=await gh(`/repos/${OWNER}/${REPO}/contents/${path}`,{method:"PUT",body:JSON.stringify(body)});
-    if(!put.ok)throw new Error("PUT "+put.status);
+    await putJson(path,s,`treino: ${s.template} ${s.data} (coach-app)`);
     finalized=true;store.del("pending-session");saveSession();
     buzz(60);toast("Treino registrado no coach-os ✓","ok");
   }catch(e){
@@ -187,17 +240,12 @@ async function retryPending(){
   const p=store.get("pending-session");if(!p||!token())return;
   try{
     const {path,session}=JSON.parse(p);
-    let sha;const head=await gh(`/repos/${OWNER}/${REPO}/contents/${path}`);
-    if(head.status!==404){sha=(await head.json()).sha;}
-    const body={message:`treino: sessão ${session.data} (coach-app, retry)`,content:b64(JSON.stringify(session,null,2))};
-    if(sha)body.sha=sha;
-    const put=await gh(`/repos/${OWNER}/${REPO}/contents/${path}`,{method:"PUT",body:JSON.stringify(body)});
-    if(put.ok){store.del("pending-session");toast("Sessão pendente enviada ✓","ok");}
+    await putJson(path,session,`treino: sessão ${session.data} (coach-app, retry)`);
+    store.del("pending-session");toast("Sessão pendente enviada ✓","ok");render();
   }catch(e){}
 }
 
 // ── interações ──
-function warmList(){return day==="B"?[...PLAN.warmup,...(PLAN.warmup_b_extra||[])]:PLAN.warmup;}
 function toggleWarm(i){checks[`${day}|wu|${i}`]=!checks[`${day}|wu|${i}`];if(!startedAt)startedAt=Date.now();saveSession();render();}
 function toggleSet(exId,rest,name,i){
   const k=`${day}|${exId}|${i}`;const on=!checks[k];checks[k]=on;
@@ -223,10 +271,9 @@ function toast(msg,kind){
 // ── render ──
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 function render(){
-  const tpl=PLAN.templates[day]||PLAN.templates.A;
-  const warm=warmList();
-  const totalSets=tpl.ex.reduce((a,e)=>a+e.sets,0);
-  const doneSets=tpl.ex.reduce((a,e)=>a+Array.from({length:e.sets}).filter((_,i)=>checks[`${day}|${e.id}|${i}`]).length,0);
+  const v=currentView();
+  const totalSets=v.ex.reduce((a,e)=>a+e.sets,0);
+  const doneSets=v.ex.reduce((a,e)=>a+Array.from({length:e.sets}).filter((_,i)=>checks[`${day}|${e.id}|${i}`]).length,0);
   const pct=totalSets?Math.round(doneSets/totalSets*100):0;
   const hasTok=!!token();
 
@@ -235,7 +282,8 @@ function render(){
     <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
       <div>
         <div class="kicker">${esc(PLAN.plano||"coach-os")}</div>
-        <h1 style="margin:4px 0 0;font-size:26px;font-weight:800;letter-spacing:-0.5px">Treino de hoje</h1>
+        <h1 style="margin:4px 0 0;font-size:24px;font-weight:800;letter-spacing:-0.5px">${esc(v.label)}</h1>
+        ${v.sub?`<div style="font-size:12.5px;color:var(--dim);margin-top:2px">${esc(v.sub)}</div>`:""}
       </div>
       <div style="display:flex;gap:6px">
         <button onclick="showConfig=!showConfig;render()" aria-label="Configurações"
@@ -244,6 +292,7 @@ function render(){
           style="background:transparent;border:1px solid var(--line);color:var(--dim);font-size:11px;padding:6px 10px;border-radius:8px;white-space:nowrap">Reiniciar</button>
       </div>
     </div>
+    ${v.nota?`<p style="margin:10px 0 0;font-size:12.5px;color:var(--amber);line-height:1.55;background:rgba(238,123,48,.08);border:1px solid rgba(238,123,48,.2);border-radius:9px;padding:9px 11px">${esc(v.nota)}</p>`:""}
     <p style="margin:8px 0 0;font-size:12.5px;color:var(--faint);line-height:1.5">
       Plano: <span class="mono" style="color:var(--dim)">${planSource}</span> · ${todayStr()}</p>
   </header>`;
@@ -262,11 +311,17 @@ function render(){
   }
 
   h+=`<div style="display:flex;gap:8px;margin-top:16px">`;
+  if(HOJE){
+    const act=day==="HOJE";
+    h+=`<button onclick="setDay('HOJE')" style="flex:1.2;padding:10px 8px;border-radius:10px;border:1px solid ${act?"var(--amber)":"var(--line)"};background:${act?"var(--amber)":"transparent"};color:${act?"var(--amber-ink)":"var(--dim)"}">
+      <div style="font-weight:800;font-size:14px">★ Hoje</div>
+      <div style="font-size:10.5px;opacity:.85;margin-top:1px">montado pelo coach</div></button>`;
+  }
   for(const d of Object.keys(PLAN.templates)){
     const t=PLAN.templates[d],act=day===d;
     h+=`<button onclick="setDay('${d}')" style="flex:1;padding:10px 8px;border-radius:10px;border:1px solid ${act?"var(--amber)":"var(--line)"};background:${act?"var(--amber)":"transparent"};color:${act?"var(--amber-ink)":"var(--dim)"}">
-      <div style="font-weight:800;font-size:14px">Dia ${d} · ${esc(t.label)}</div>
-      <div style="font-size:10.5px;opacity:.85;margin-top:1px">${esc(t.sub)} · ${esc(t.days)}</div></button>`;
+      <div style="font-weight:800;font-size:14px">${d} · ${esc(t.label)}</div>
+      <div style="font-size:10.5px;opacity:.85;margin-top:1px">${esc(t.days||"")}</div></button>`;
   }
   h+=`</div>`;
 
@@ -285,31 +340,35 @@ function render(){
       <span style="color:var(--dim);font-size:13px">${warmOpen?"▾":"▸"}</span></button>`;
   if(warmOpen){
     h+=`<div style="padding:0 8px 8px">`;
-    warm.forEach((m,i)=>{
+    v.warmup.forEach((m,i)=>{
       const on=!!checks[`${day}|wu|${i}`];
-      h+=`<button onclick="toggleWarm(${i})" style="width:100%;text-align:left;display:flex;gap:11px;align-items:flex-start;padding:9px 8px;background:transparent;border:none;${i?"border-top:1px solid var(--line);":""}color:var(--text)">
+      h+=`<div style="${i?"border-top:1px solid var(--line);":""}">
+        <button onclick="toggleWarm(${i})" style="width:100%;text-align:left;display:flex;gap:11px;align-items:flex-start;padding:9px 8px;background:transparent;border:none;color:var(--text)">
         <span style="margin-top:1px;width:18px;height:18px;border-radius:5px;flex-shrink:0;border:1.5px solid ${on?"var(--amber)":"var(--faint)"};background:${on?"var(--amber)":"transparent"};color:var(--amber-ink);font-size:12px;line-height:15px;text-align:center;font-weight:800">${on?"✓":""}</span>
         <span style="flex:1"><span style="display:flex;justify-content:space-between;gap:8px">
           <span style="font-weight:600;font-size:14px;opacity:${on?".5":"1"};text-decoration:${on?"line-through":"none"}">${esc(m.name)}</span>
           <span class="mono" style="font-size:12.5px;color:var(--amber);white-space:nowrap">${esc(m.dose)}</span></span>
-          <span style="display:block;font-size:11.5px;color:var(--faint);margin-top:2px;line-height:1.45">${esc(m.desc)}</span></span></button>`;
+          <span style="display:block;font-size:11.5px;color:var(--faint);margin-top:2px;line-height:1.45">${esc(m.desc)}</span></span></button>
+        ${m.gif?`<div style="padding:0 8px 8px 37px"><button onclick="toggleGif('wu${i}',null,'${m.gif}')" style="background:transparent;border:none;color:var(--faint);font-size:11px;padding:0">${gifOpen["wu"+i]?"▾ esconder movimento":"▸ ver movimento"}</button>${gifBlock("wu"+i,m.gif)}</div>`:""}
+      </div>`;
     });
     h+=`</div>`;
   }
   h+=`</section>`;
 
   h+=`<div style="margin-top:18px;display:flex;flex-direction:column;gap:12px">`;
-  tpl.ex.forEach((ex,idx)=>{
+  v.ex.forEach((ex,idx)=>{
     const w=weights[ex.id]??ex.w;
     const marks=Array.from({length:ex.sets},(_,i)=>!!checks[`${day}|${ex.id}|${i}`]);
     const exDone=marks.every(Boolean);
-    const nextIdx=marks.findIndex(v=>!v);
+    const nextIdx=marks.findIndex(x=>!x);
     h+=`<section class="card" style="border-color:${exDone?"var(--amber)":"var(--line)"};padding:15px;opacity:${exDone?".78":"1"}">
       <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px">
-        <div style="display:flex;align-items:baseline;gap:8px">
+        <button onclick="toggleGif('${ex.id}','${esc(ex.name)}',${ex.gif?`'${ex.gif}'`:"null"})" style="display:flex;align-items:baseline;gap:8px;background:transparent;border:none;color:var(--text);padding:0;text-align:left">
           <span class="mono" style="font-size:12px;color:var(--faint)">${String(idx+1).padStart(2,"0")}</span>
-          <h2 style="margin:0;font-size:16.5px;font-weight:700;letter-spacing:-0.3px">${esc(ex.name)}</h2></div>
-        <span class="mono" style="font-size:12.5px;color:var(--dim);white-space:nowrap">${ex.sets} × ${esc(ex.reps)}</span></div>`;
+          <h2 style="margin:0;font-size:16.5px;font-weight:700;letter-spacing:-0.3px">${esc(ex.name)} <span style="color:var(--faint);font-size:12px;font-weight:400">${gifOpen[ex.id]?"▾":"▸"}</span></h2></button>
+        <span class="mono" style="font-size:12.5px;color:var(--dim);white-space:nowrap">${ex.sets} × ${esc(ex.reps)}</span></div>
+      ${gifBlock(ex.id,ex.gif)}`;
     if(ex.note)h+=`<p style="margin:9px 0 0;font-size:12px;color:var(--amber);line-height:1.5;background:rgba(238,123,48,.08);border:1px solid rgba(238,123,48,.2);border-radius:9px;padding:8px 10px">${esc(ex.note)}</p>`;
     h+=`<div style="margin-top:13px;display:flex;flex-wrap:wrap;align-items:center;gap:14px;justify-content:space-between">
       <div style="display:flex;align-items:center;gap:8px">
@@ -348,7 +407,8 @@ function render(){
   });
   h+=`</section>
   <p style="text-align:center;font-size:11px;color:var(--faint);margin-top:22px;line-height:1.6;font-style:italic">
-    Treino é processo, não evento.<br>Ataca o corpo igual ataca o negócio: com dados.</p>`;
+    Treino é processo, não evento.<br>Ataca o corpo igual ataca o negócio: com dados.</p>
+  <p style="text-align:center;font-size:10px;color:var(--faint);margin-top:8px">GIFs de demonstração: ExerciseDB · exercisedb.dev</p>`;
 
   document.getElementById("app").innerHTML=h;
 }
