@@ -70,7 +70,8 @@ const FALLBACK_PLAN={
 
 // ── estado ──
 let PLAN=FALLBACK_PLAN, HOJE=null, planSource="embutido";
-let day=null, checks={}, weights={}, warmOpen=true, startedAt=null, finalized=false;
+let day=null, checks={}, reps={}, weights={}, warmOpen=true, startedAt=null, finalized=false;
+let pressState=null;
 let timer=null, timerInterval=null, wakeLock=null, timerFired=false;
 let showConfig=false, uploading=false;
 let gifOpen={}, gifCache={};
@@ -95,13 +96,13 @@ function loadSession(){
   weights=JSON.parse(store.get("kb-weights")||"{}");
   try{
     const s=JSON.parse(store.get("kb-session")||"null");
-    if(s&&s.date===todayStr()){checks=s.checks||{};day=s.day||weekdayDay();startedAt=s.startedAt||null;finalized=!!s.finalized;}
+    if(s&&s.date===todayStr()){checks=s.checks||{};reps=s.reps||{};day=s.day||weekdayDay();startedAt=s.startedAt||null;finalized=!!s.finalized;}
     else{day=weekdayDay();}
   }catch(e){day=weekdayDay();}
 }
 function saveSession(){
   store.set("kb-weights",JSON.stringify(weights));
-  store.set("kb-session",JSON.stringify({date:todayStr(),day,checks,startedAt,finalized}));
+  store.set("kb-session",JSON.stringify({date:todayStr(),day,checks,reps,startedAt,finalized}));
 }
 
 // ── som + vibração ──
@@ -161,7 +162,7 @@ async function fetchPlan(){
     const h=await fetchRepoJson("treino/hoje.json");
     if(h&&h.data===todayStr()&&Array.isArray(h.ex)&&h.ex.length){
       HOJE=h;planSource="coach-os";
-      const hadChecks=Object.keys(checks).some(k=>checks[k]);
+      const hadChecks=Object.keys(checks).some(k=>checks[k])||Object.keys(reps).length>0;
       if(!hadChecks)day="HOJE";
     }
   }catch(e){}
@@ -208,8 +209,9 @@ function gifBlock(id){
 function buildSessionJson(){
   const v=currentView();
   const exercicios=v.ex.map(ex=>{
-    const done=Array.from({length:ex.sets}).filter((_,i)=>checks[`${day}|${ex.id}|${i}`]).length;
-    return {exercicio:ex.name,carga:weights[ex.id]??ex.w,unidade:ex.unit||"kg",series_plano:ex.sets,series_feitas:done,reps_alvo:ex.reps,descanso_s:ex.rest};
+    const repsArr=Array.from({length:ex.sets},(_,i)=>reps[`${day}|${ex.id}|${i}`]??null);
+    const done=repsArr.filter(v=>v!==null).length;
+    return {exercicio:ex.name,carga:weights[ex.id]??ex.w,unidade:ex.unit||"kg",series_plano:ex.sets,series_feitas:done,reps_alvo:ex.reps,reps_series:repsArr,descanso_s:ex.rest};
   });
   const warmDone=v.warmup.filter((_,i)=>checks[`${day}|wu|${i}`]).length;
   const dur=startedAt?Math.round((Date.now()-startedAt)/60000):null;
@@ -256,15 +258,33 @@ async function retryPending(){
 
 // ── interações ──
 function toggleWarm(i){checks[`${day}|wu|${i}`]=!checks[`${day}|wu|${i}`];if(!startedAt)startedAt=Date.now();saveSession();render();}
-function toggleSet(exId,rest,name,i){
-  const k=`${day}|${exId}|${i}`;const on=!checks[k];checks[k]=on;
+function repTarget(str){const n=(String(str).match(/\d+/g)||[]).map(Number);return n.length?n[n.length-1]:10;}
+function adjustSet(exId,rest,name,i,tgt,dir){
+  const k=`${day}|${exId}|${i}`;const cur=reps[k];let firstLog=false;
+  if(cur===undefined){reps[k]=tgt;firstLog=true;}
+  else if(dir>0){reps[k]=Math.min(50,cur+1);}
+  else if(cur<=1){delete reps[k];}
+  else{reps[k]=cur-1;}
   if(!startedAt)startedAt=Date.now();
-  if(on){buzz(15);startRest(rest,name);}
+  if(firstLog){buzz(15);startRest(rest,name);}else{buzz(8);}
   saveSession();render();
 }
+function setDown(exId,rest,name,i,tgt,ev){
+  if(ev&&ev.preventDefault)ev.preventDefault();
+  if(pressState)clearTimeout(pressState.timer);
+  pressState={long:false};
+  pressState.timer=setTimeout(()=>{pressState.long=true;adjustSet(exId,rest,name,i,tgt,1);},420);
+}
+function setUp(exId,rest,name,i,tgt,ev){
+  if(ev&&ev.preventDefault)ev.preventDefault();
+  if(!pressState)return;
+  clearTimeout(pressState.timer);const wasLong=pressState.long;pressState=null;
+  if(!wasLong)adjustSet(exId,rest,name,i,tgt,-1);
+}
+function setCancel(){if(pressState){clearTimeout(pressState.timer);pressState=null;}}
 function stepW(id,base,d){const cur=weights[id]??base;weights[id]=Math.max(2,cur+d);saveSession();render();}
 function setDay(d){day=d;saveSession();render();}
-function resetSession(){stopTimer();checks={};startedAt=null;finalized=false;saveSession();render();}
+function resetSession(){stopTimer();checks={};reps={};startedAt=null;finalized=false;saveSession();render();}
 function saveToken(){
   const v=document.getElementById("tok").value.trim();
   if(v)store.set("gh-token",v);else store.del("gh-token");
@@ -285,7 +305,7 @@ function render(){
   v.warmup.forEach((m,i)=>{if(m.demo||m.gif)_DEMOS["wu"+i]=m.demo||m.gif;});
   v.ex.forEach(ex=>{if(ex.demo||ex.gif)_DEMOS[ex.id]=ex.demo||ex.gif;});
   const totalSets=v.ex.reduce((a,e)=>a+e.sets,0);
-  const doneSets=v.ex.reduce((a,e)=>a+Array.from({length:e.sets}).filter((_,i)=>checks[`${day}|${e.id}|${i}`]).length,0);
+  const doneSets=v.ex.reduce((a,e)=>a+Array.from({length:e.sets}).filter((_,i)=>reps[`${day}|${e.id}|${i}`]!==undefined).length,0);
   const pct=totalSets?Math.round(doneSets/totalSets*100):0;
   const hasTok=!!token();
 
@@ -372,7 +392,9 @@ function render(){
   v.ex.forEach((ex,idx)=>{
     const w=weights[ex.id]??ex.w;
     const unit=ex.unit||"kg", stepW_=unit==="lb"?5:2;
-    const marks=Array.from({length:ex.sets},(_,i)=>!!checks[`${day}|${ex.id}|${i}`]);
+    const tgt=repTarget(ex.reps);
+    const repVals=Array.from({length:ex.sets},(_,i)=>reps[`${day}|${ex.id}|${i}`]);
+    const marks=repVals.map(v=>v!==undefined);
     const exDone=marks.every(Boolean);
     const nextIdx=marks.findIndex(x=>!x);
     h+=`<section class="card" style="border-color:${exDone?"var(--amber)":"var(--line)"};padding:15px;opacity:${exDone?".78":"1"}">
@@ -392,9 +414,9 @@ function render(){
         <button onclick="stepW('${ex.id}',${ex.w},${stepW_})" style="width:34px;height:34px;border-radius:9px;border:1px solid var(--line);background:transparent;color:var(--text);font-size:19px;line-height:1">+</button></div>
       <div style="display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end">`;
     marks.forEach((on,i)=>{
-      const isNext=!on&&i===nextIdx;
-      h+=`<button onclick="toggleSet('${ex.id}',${ex.rest},'${esc(ex.name)}',${i})" aria-label="Série ${i+1}${on?" feita":""}"
-        style="width:42px;height:42px;border-radius:11px;font-size:15px;font-weight:700;color:${on?"var(--amber-ink)":isNext?"var(--amber)":"var(--dim)"};background:${on?"var(--amber)":"transparent"};border:1.5px solid ${on||isNext?"var(--amber)":"var(--line)"};box-shadow:${isNext?"0 0 0 3px rgba(238,123,48,.13)":"none"}" class="mono">${on?"✓":i+1}</button>`;
+      const isNext=!on&&i===nextIdx;const a=`'${ex.id}',${ex.rest},'${esc(ex.name)}',${i},${tgt}`;
+      h+=`<button onpointerdown="setDown(${a},event)" onpointerup="setUp(${a},event)" onpointercancel="setCancel()" onpointerleave="setCancel()" oncontextmenu="return false" aria-label="Série ${i+1}${on?", "+repVals[i]+" reps":""}"
+        style="width:42px;height:42px;border-radius:11px;font-size:15px;font-weight:700;color:${on?"var(--amber-ink)":isNext?"var(--amber)":"var(--dim)"};background:${on?"var(--amber)":"transparent"};border:1.5px solid ${on||isNext?"var(--amber)":"var(--line)"};box-shadow:${isNext?"0 0 0 3px rgba(238,123,48,.13)":"none"};touch-action:none;user-select:none;-webkit-user-select:none" class="mono">${on?repVals[i]:i+1}</button>`;
     });
     h+=`</div></div>
       <div class="mono" style="margin-top:9px;font-size:10.5px;color:var(--faint)">descanso ${ex.rest}s entre séries</div></section>`;
