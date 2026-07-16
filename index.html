@@ -209,7 +209,7 @@ function buildSessionJson(){
   const v=currentView();
   const exercicios=v.ex.map(ex=>{
     const done=Array.from({length:ex.sets}).filter((_,i)=>checks[`${day}|${ex.id}|${i}`]).length;
-    return {exercicio:ex.name,carga_kg:weights[ex.id]??ex.w,series_plano:ex.sets,series_feitas:done,reps_alvo:ex.reps,descanso_s:ex.rest};
+    return {exercicio:ex.name,carga:weights[ex.id]??ex.w,unidade:ex.unit||"kg",series_plano:ex.sets,series_feitas:done,reps_alvo:ex.reps,descanso_s:ex.rest};
   });
   const warmDone=v.warmup.filter((_,i)=>checks[`${day}|wu|${i}`]).length;
   const dur=startedAt?Math.round((Date.now()-startedAt)/60000):null;
@@ -371,6 +371,7 @@ function render(){
   h+=`<div style="margin-top:18px;display:flex;flex-direction:column;gap:12px">`;
   v.ex.forEach((ex,idx)=>{
     const w=weights[ex.id]??ex.w;
+    const unit=ex.unit||"kg", stepW_=unit==="lb"?5:2;
     const marks=Array.from({length:ex.sets},(_,i)=>!!checks[`${day}|${ex.id}|${i}`]);
     const exDone=marks.every(Boolean);
     const nextIdx=marks.findIndex(x=>!x);
@@ -384,11 +385,11 @@ function render(){
     if(ex.note)h+=`<p style="margin:9px 0 0;font-size:12px;color:var(--amber);line-height:1.5;background:rgba(238,123,48,.08);border:1px solid rgba(238,123,48,.2);border-radius:9px;padding:8px 10px">${esc(ex.note)}</p>`;
     h+=`<div style="margin-top:13px;display:flex;flex-wrap:wrap;align-items:center;gap:14px;justify-content:space-between">
       <div style="display:flex;align-items:center;gap:8px">
-        <button onclick="stepW('${ex.id}',${ex.w},-2)" style="width:34px;height:34px;border-radius:9px;border:1px solid var(--line);background:transparent;color:var(--text);font-size:19px;line-height:1">–</button>
+        <button onclick="stepW('${ex.id}',${ex.w},-${stepW_})" style="width:34px;height:34px;border-radius:9px;border:1px solid var(--line);background:transparent;color:var(--text);font-size:19px;line-height:1">–</button>
         <div style="text-align:center;min-width:52px">
-          <div class="mono" style="font-size:22px;font-weight:700;line-height:1">${w}<span style="font-size:11px;color:var(--dim);font-weight:400"> kg</span></div>
+          <div class="mono" style="font-size:22px;font-weight:700;line-height:1">${w}<span style="font-size:11px;color:var(--dim);font-weight:400"> ${unit}</span></div>
           <div style="font-size:9.5px;color:var(--faint);margin-top:2px">plano: ${esc(ex.hint)}</div></div>
-        <button onclick="stepW('${ex.id}',${ex.w},2)" style="width:34px;height:34px;border-radius:9px;border:1px solid var(--line);background:transparent;color:var(--text);font-size:19px;line-height:1">+</button></div>
+        <button onclick="stepW('${ex.id}',${ex.w},${stepW_})" style="width:34px;height:34px;border-radius:9px;border:1px solid var(--line);background:transparent;color:var(--text);font-size:19px;line-height:1">+</button></div>
       <div style="display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end">`;
     marks.forEach((on,i)=>{
       const isNext=!on&&i===nextIdx;
