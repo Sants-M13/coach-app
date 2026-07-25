@@ -34,11 +34,12 @@
 <script>
 // ── coach-app · superfície de captura do coach-os ──────────────────────
 // Prioridade do treino exibido: treino/hoje.json (montado pelo coach) →
-// template do dia da semana em treino/planos/current.json → fallback embutido.
+// template do dia da semana pelo `cronograma` de treino/planos/current.json → NENHUM.
+// Nunca inventar treino: dia sem treino montado mostra estado vazio explícito, não fallback silencioso.
 // Sessão finalizada → commit em treino/logs/AAAA-MM/AAAA-MM-DD-<slug>.json
 // Demonstrações: free-exercise-db (domínio público) — pares de foto animados (posição inicial ↔ final).
 // campo demo: ["Dir/0.jpg","Dir/1.jpg"] (relativo à RAW) ou URL http completa.
-const BUILD="2026-07-16d";
+const BUILD="2026-07-25a";
 const OWNER="Sants-M13", REPO="coach-os", API="https://api.github.com";
 const RAW="https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/";
 const RAW_DB="https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/dist/exercises.json";
@@ -84,11 +85,20 @@ const store={get:k=>{try{return localStorage.getItem(k)}catch(e){return null}},
              del:k=>{try{localStorage.removeItem(k)}catch(e){}}};
 const token=()=>store.get("gh-token")||"";
 
-function weekdayDay(){const map={1:"A",2:"B",4:"A",5:"B"};return map[new Date().getDay()]||"A";}
+const WD=["dom","seg","ter","qua","qui","sex","sab"];
+// Dia da semana → chave de template, lida do `cronograma` do plano vigente (seg:"U", ter:"L", ...).
+// Retorna null quando o dia não tem treino de força (zone2/off) ou o plano não bate — NUNCA chuta um template.
+function weekdayDay(){
+  const t=PLAN.templates||{};
+  const k=(PLAN.cronograma||{})[WD[new Date().getDay()]];
+  return (k&&t[k])?k:null;
+}
 function currentView(){
   if(day==="HOJE"&&HOJE)return{label:HOJE.titulo||"Treino de hoje",sub:HOJE.sub||"",ex:HOJE.ex||[],
     warmup:HOJE.warmup||PLAN.warmup,nota:HOJE.nota_coach||null};
-  const t=PLAN.templates[day]||PLAN.templates.A;
+  const t=(PLAN.templates||{})[day];
+  if(!t)return{label:"Sem treino montado pra hoje",sub:"o coach não montou o dia — escolhe um template abaixo",
+    ex:[],warmup:PLAN.warmup||[],nota:null,vazio:true};
   const warm=day==="B"?[...PLAN.warmup,...(PLAN.warmup_b_extra||[])]:PLAN.warmup;
   return{label:`Dia ${day} · ${t.label}`,sub:(t.sub||"")+" · "+(t.days||""),ex:t.ex,warmup:warm,nota:null};
 }
@@ -157,7 +167,11 @@ async function fetchPlan(){
   if(!token())return;
   try{
     const p=await fetchRepoJson("treino/planos/current.json");
-    if(p&&p.templates){PLAN=p;planSource="coach-os";}
+    if(p&&p.templates){
+      PLAN=p;planSource="coach-os";
+      // plano novo pode não ter a chave que estava selecionada (ex.: A/B da fase antiga vs U/L) → recalcula
+      if(day!=="HOJE"&&!PLAN.templates[day])day=weekdayDay();
+    }
   }catch(e){}
   try{
     const h=await fetchRepoJson("treino/hoje.json");
@@ -362,6 +376,22 @@ function render(){
       <div style="font-size:10.5px;opacity:.85;margin-top:1px">${esc(t.days||"")}</div></button>`;
   }
   h+=`</div>`;
+
+  // plano não carregou do coach-os → avisar em vez de fingir que o embutido é o plano vigente
+  if(planSource==="embutido"){
+    h+=`<div style="margin-top:12px;font-size:12.5px;color:var(--err);line-height:1.55;border:1px solid rgba(208,80,80,.35);background:rgba(208,80,80,.07);border-radius:10px;padding:10px 12px">
+      <b>Plano não carregou do coach-os.</b> O que aparece abaixo é o plano embutido no app (fase A antiga, KB puro) —
+      ${token()?"não é o teu plano vigente. Confere a conexão e recarrega.":"configura o token no ⚙ pra puxar o plano de verdade."}</div>`;
+  }
+  if(v.vazio){
+    h+=`<section class="card" style="margin-top:16px;padding:16px">
+      <div style="font-size:11px;letter-spacing:2px;color:var(--dim);text-transform:uppercase;margin-bottom:8px">Nada montado pra hoje</div>
+      <p style="margin:0;font-size:13px;color:var(--dim);line-height:1.6">
+        O coach não montou <span class="mono">treino/hoje.json</span> pra <span class="mono">${todayStr()}</span>${(PLAN.cronograma||{})[WD[new Date().getDay()]]?"":", e o cronograma não tem treino de força hoje"}.
+        Antes o app inventava um treino velho aqui — agora ele te fala.<br><br>
+        Quer treinar mesmo assim? Escolhe um template nos botões acima. Ou pede pro coach montar o dia.</p>
+    </section>`;
+  }
 
   h+=`<div style="margin-top:16px">
     <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--dim);margin-bottom:6px">
