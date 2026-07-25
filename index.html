@@ -39,7 +39,7 @@
 // Sessão finalizada → commit em treino/logs/AAAA-MM/AAAA-MM-DD-<slug>.json
 // Demonstrações: free-exercise-db (domínio público) — pares de foto animados (posição inicial ↔ final).
 // campo demo: ["Dir/0.jpg","Dir/1.jpg"] (relativo à RAW) ou URL http completa.
-const BUILD="2026-07-25a";
+const BUILD="2026-07-25b";
 const OWNER="Sants-M13", REPO="coach-os", API="https://api.github.com";
 const RAW="https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/";
 const RAW_DB="https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/dist/exercises.json";
@@ -299,7 +299,10 @@ function setUp(exId,rest,name,i,tgt,ev){
 function setCancel(){if(pressState){clearTimeout(pressState.timer);pressState=null;}}
 function stepW(id,base,unit,dir){
   const cur=weights[id]??base;
-  if(unit==="lb"){weights[id]=Math.max(5,Math.round(cur/5)*5+dir*5);} // halter/barra: passo 5, snap na grade (anilhas: menor = 2×2,5)
+  // halter/barra: passo 2,5 e snap na grade de 2,5. O app mostra POR LADO, e por lado o menor
+  // incremento real do Matheus é 2,5 lb (tem 4 anilhas de 2,5 — ver perfil/anamnese.md).
+  // Progressão continua sendo +5 lb (ops/policies.yaml); 2,5 existe pra REGISTRAR o que foi feito.
+  if(unit==="lb"){const g=2.5;weights[id]=Math.max(g,Math.round((Math.round(cur/g)*g+dir*g)*10)/10);}
   else{weights[id]=dir>0?24:16;} // kettlebell: só existe 16 e 24 kg
   saveSession();render();
 }
@@ -451,8 +454,8 @@ function render(){
       <div style="display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end">`;
     marks.forEach((on,i)=>{
       const isNext=!on&&i===nextIdx;const a=`'${ex.id}',${ex.rest},'${esc(ex.name)}',${i},${tgt}`;
-      h+=`<button onpointerdown="setDown(${a},event)" onpointerup="setUp(${a},event)" onpointercancel="setCancel()" onpointerleave="setCancel()" oncontextmenu="return false" aria-label="Série ${i+1}${on?", "+repVals[i]+" reps":""}"
-        style="width:42px;height:42px;border-radius:11px;font-size:15px;font-weight:700;color:${on?"var(--amber-ink)":isNext?"var(--amber)":"var(--dim)"};background:${on?"var(--amber)":"transparent"};border:1.5px solid ${on||isNext?"var(--amber)":"var(--line)"};box-shadow:${isNext?"0 0 0 3px rgba(238,123,48,.13)":"none"};touch-action:none;user-select:none;-webkit-user-select:none" class="mono">${on?repVals[i]:i+1}</button>`;
+      h+=`<button onpointerdown="setDown(${a},event)" onpointerup="setUp(${a},event)" onpointercancel="setCancel()" onpointerleave="setCancel()" oncontextmenu="return false" aria-label="Série ${i+1}: ${on?repVals[i]+" reps feitas":"alvo "+tgt+" reps"}"
+        style="width:42px;height:42px;border-radius:11px;font-size:15px;font-weight:700;color:${on?"var(--amber-ink)":isNext?"var(--amber)":"var(--dim)"};background:${on?"var(--amber)":"transparent"};border:1.5px solid ${on||isNext?"var(--amber)":"var(--line)"};box-shadow:${isNext?"0 0 0 3px rgba(238,123,48,.13)":"none"};touch-action:none;user-select:none;-webkit-user-select:none" class="mono">${on?repVals[i]:tgt}</button>`;
     });
     h+=`</div></div>
       <div class="mono" style="margin-top:9px;font-size:10.5px;color:var(--faint)">descanso ${ex.rest}s entre séries</div></section>`;
