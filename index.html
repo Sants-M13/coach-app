@@ -39,7 +39,7 @@
 // Sessão finalizada → commit em treino/logs/AAAA-MM/AAAA-MM-DD-<slug>.json
 // Demonstrações: free-exercise-db (domínio público) — pares de foto animados (posição inicial ↔ final).
 // campo demo: ["Dir/0.jpg","Dir/1.jpg"] (relativo à RAW) ou URL http completa.
-const BUILD="2026-07-25d";
+const BUILD="2026-07-25e";
 const OWNER="Sants-M13", REPO="coach-os", API="https://api.github.com";
 const RAW="https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/";
 const RAW_DB="https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/dist/exercises.json";
@@ -78,6 +78,7 @@ let timer=null, timerInterval=null, wakeLock=null, timerFired=false;
 let showConfig=false, uploading=false;
 let gifOpen={}, gifCache={}, obsOpen={};
 let obs={};   // `${day}|${ex.id}` → texto livre que o Matheus escreve pro coach
+let wbase={}; // ex.id → o ex.w que o override em weights[] tomou como base
 
 const todayStr=()=>new Date().toLocaleDateString("en-CA");
 const fmt=s=>`${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`;
@@ -105,7 +106,11 @@ function currentView(){
 }
 
 function loadSession(){
-  weights=JSON.parse(store.get("kb-weights")||"{}");
+  const kw=JSON.parse(store.get("kb-weights")||"{}");
+  // formato novo {w,base}; formato antigo era um mapa plano — migra sem base, então os
+  // overrides herdados são descartados e a prescrição do coach volta a valer
+  if(kw&&typeof kw==="object"&&kw.w){weights=kw.w||{};wbase=kw.base||{};}
+  else{weights=kw||{};wbase={};}
   try{
     const s=JSON.parse(store.get("kb-session")||"null");
     if(s&&s.date===todayStr()){checks=s.checks||{};reps=s.reps||{};obs=s.obs||{};day=s.day||weekdayDay();startedAt=s.startedAt||null;endedAt=s.endedAt||null;finalized=!!s.finalized;}
@@ -113,7 +118,7 @@ function loadSession(){
   }catch(e){day=weekdayDay();}
 }
 function saveSession(){
-  store.set("kb-weights",JSON.stringify(weights));
+  store.set("kb-weights",JSON.stringify({w:weights,base:wbase}));
   store.set("kb-session",JSON.stringify({date:todayStr(),day,checks,reps,obs,startedAt,endedAt,finalized}));
 }
 
@@ -228,7 +233,7 @@ function buildSessionJson(){
     const repsArr=Array.from({length:ex.sets},(_,i)=>reps[`${day}|${ex.id}|${i}`]??null);
     const done=repsArr.filter(v=>v!==null).length;
     const o=(obs[obsKey(ex.id)]||"").trim();
-    const linha={exercicio:ex.name,carga:weights[ex.id]??ex.w,unidade:ex.unit||"kg",series_plano:ex.sets,series_feitas:done,reps_alvo:ex.reps,reps_series:repsArr,descanso_s:ex.rest};
+    const linha={exercicio:ex.name,carga:effW(ex.id,ex.w),unidade:ex.unit||"kg",series_plano:ex.sets,series_feitas:done,reps_alvo:ex.reps,reps_series:repsArr,descanso_s:ex.rest};
     if(o)linha.obs=o;   // texto livre do Matheus pro coach ler no /coach-semana
     return linha;
   });
@@ -317,14 +322,21 @@ function setUp(exId,rest,name,i,tgt,ev){
 }
 function setCancel(){if(pressState){clearTimeout(pressState.timer);pressState=null;}}
 function stepW(id,base,unit,dir){
-  const cur=weights[id]??base;
+  const cur=effW(id,base);
   // halter/barra: passo 2,5 e snap na grade de 2,5. O app mostra POR LADO, e por lado o menor
   // incremento real do Matheus é 2,5 lb (tem 4 anilhas de 2,5 — ver perfil/anamnese.md).
   // Progressão continua sendo +5 lb (ops/policies.yaml); 2,5 existe pra REGISTRAR o que foi feito.
   if(unit==="lb"){const g=2.5;weights[id]=Math.max(g,Math.round((Math.round(cur/g)*g+dir*g)*10)/10);}
   else{weights[id]=dir>0?24:16;} // kettlebell: só existe 16 e 24 kg
+  wbase[id]=base;   // carimba de qual prescrição esse override saiu
   saveSession();render();
 }
+// Carga exibida. O ajuste no ± persiste entre sessões (comodidade), MAS se o coach mudar a
+// prescrição daquele exercício, a prescrição ganha e o override velho é descartado.
+// Sem isso um valor salvo em qualquer sessão passada sobrepõe o hoje.json calado — foi o que
+// fez a elevação lateral sair 15 lb em 25/jul quando o coach tinha prescrito 10.
+function effW(id,base){return (wbase[id]===base&&weights[id]!=null)?weights[id]:base;}
+
 function obsKey(id){return `${day}|${id}`;}
 function toggleObs(id){
   obsOpen[id]=!obsOpen[id];render();
@@ -456,7 +468,7 @@ function render(){
 
   h+=`<div style="margin-top:18px;display:flex;flex-direction:column;gap:12px">`;
   v.ex.forEach((ex,idx)=>{
-    const w=weights[ex.id]??ex.w;
+    const w=effW(ex.id,ex.w);
     const unit=ex.unit||"kg";
     const tgt=repTarget(ex.reps);
     const repVals=Array.from({length:ex.sets},(_,i)=>reps[`${day}|${ex.id}|${i}`]);
