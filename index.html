@@ -39,7 +39,7 @@
 // Sessão finalizada → commit em treino/logs/AAAA-MM/AAAA-MM-DD-<slug>.json
 // Demonstrações: free-exercise-db (domínio público) — pares de foto animados (posição inicial ↔ final).
 // campo demo: ["Dir/0.jpg","Dir/1.jpg"] (relativo à RAW) ou URL http completa.
-const BUILD="2026-07-25b";
+const BUILD="2026-07-25c";
 const OWNER="Sants-M13", REPO="coach-os", API="https://api.github.com";
 const RAW="https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/";
 const RAW_DB="https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/dist/exercises.json";
@@ -72,7 +72,7 @@ const FALLBACK_PLAN={
 
 // ── estado ──
 let PLAN=FALLBACK_PLAN, HOJE=null, planSource="embutido";
-let day=null, checks={}, reps={}, weights={}, warmOpen=true, startedAt=null, finalized=false;
+let day=null, checks={}, reps={}, weights={}, warmOpen=true, startedAt=null, endedAt=null, finalized=false;
 let pressState=null;
 let timer=null, timerInterval=null, wakeLock=null, timerFired=false;
 let showConfig=false, uploading=false;
@@ -107,13 +107,13 @@ function loadSession(){
   weights=JSON.parse(store.get("kb-weights")||"{}");
   try{
     const s=JSON.parse(store.get("kb-session")||"null");
-    if(s&&s.date===todayStr()){checks=s.checks||{};reps=s.reps||{};day=s.day||weekdayDay();startedAt=s.startedAt||null;finalized=!!s.finalized;}
+    if(s&&s.date===todayStr()){checks=s.checks||{};reps=s.reps||{};day=s.day||weekdayDay();startedAt=s.startedAt||null;endedAt=s.endedAt||null;finalized=!!s.finalized;}
     else{day=weekdayDay();}
   }catch(e){day=weekdayDay();}
 }
 function saveSession(){
   store.set("kb-weights",JSON.stringify(weights));
-  store.set("kb-session",JSON.stringify({date:todayStr(),day,checks,reps,startedAt,finalized}));
+  store.set("kb-session",JSON.stringify({date:todayStr(),day,checks,reps,startedAt,endedAt,finalized}));
 }
 
 // ── som + vibração ──
@@ -229,7 +229,7 @@ function buildSessionJson(){
     return {exercicio:ex.name,carga:weights[ex.id]??ex.w,unidade:ex.unit||"kg",series_plano:ex.sets,series_feitas:done,reps_alvo:ex.reps,reps_series:repsArr,descanso_s:ex.rest};
   });
   const warmDone=v.warmup.filter((_,i)=>checks[`${day}|wu|${i}`]).length;
-  const dur=startedAt?Math.round((Date.now()-startedAt)/60000):null;
+  const dur=startedAt?Math.round(((endedAt||Date.now())-startedAt)/60000):null;
   return {
     data:todayStr(),plano:PLAN.plano||"",template:v.label,
     origem_treino:day==="HOJE"?((HOJE&&HOJE.origem)||"coach (hoje.json)"):"template "+day,
@@ -248,6 +248,7 @@ async function putJson(path,obj,msg){
 }
 async function finalizeSession(){
   if(!token()){showConfig=true;render();toast("Configura o token do GitHub primeiro (⚙).","err");return;}
+  if(startedAt&&!endedAt)endedAt=Date.now();   // congela o cronômetro no clique, não na hora do upload
   uploading=true;render();
   const s=buildSessionJson();
   const slug=day==="HOJE"?"hoje":day.toLowerCase();
@@ -273,6 +274,20 @@ async function retryPending(){
 
 // ── interações ──
 function toggleWarm(i){checks[`${day}|wu|${i}`]=!checks[`${day}|wu|${i}`];if(!startedAt)startedAt=Date.now();saveSession();render();}
+// ── cronômetro global do treino ──
+// startedAt é setado na 1ª marcação (toggleWarm ou adjustSet); endedAt congela ao finalizar.
+// Atualiza só o nó de texto a cada segundo — não re-renderiza a tela inteira.
+function elapsedMs(){return startedAt?((endedAt||Date.now())-startedAt):0;}
+function fmtElapsed(ms){
+  const t=Math.max(0,Math.floor(ms/1000)),h=Math.floor(t/3600),m=Math.floor(t%3600/60),sec=t%60;
+  return h?`${h}:${String(m).padStart(2,"0")}:${String(sec).padStart(2,"0")}`:`${m}:${String(sec).padStart(2,"0")}`;
+}
+function tickElapsed(){
+  const el=document.getElementById("elapsed");if(!el)return;
+  el.textContent=startedAt?fmtElapsed(elapsedMs()):"—";
+}
+setInterval(tickElapsed,1000);
+
 function repTarget(str){const n=(String(str).match(/\d+/g)||[]).map(Number);return n.length?n[n.length-1]:10;}
 function adjustSet(exId,rest,name,i,tgt,dir){
   const k=`${day}|${exId}|${i}`;const cur=reps[k];let firstLog=false;
@@ -307,7 +322,7 @@ function stepW(id,base,unit,dir){
   saveSession();render();
 }
 function setDay(d){day=d;saveSession();render();}
-function resetSession(){stopTimer();checks={};reps={};startedAt=null;finalized=false;saveSession();render();}
+function resetSession(){stopTimer();checks={};reps={};startedAt=null;endedAt=null;finalized=false;saveSession();render();}
 function saveToken(){
   const v=document.getElementById("tok").value.trim();
   if(v)store.set("gh-token",v);else store.del("gh-token");
@@ -399,7 +414,7 @@ function render(){
   h+=`<div style="margin-top:16px">
     <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--dim);margin-bottom:6px">
       <span style="letter-spacing:1.5px;text-transform:uppercase">Trabalho de hoje</span>
-      <span class="mono">${doneSets}/${totalSets} séries · ${pct}%</span></div>
+      <span class="mono"><span id="elapsed" style="color:${startedAt?(finalized?"var(--ok)":"var(--amber)"):"var(--faint)"};font-weight:700">${startedAt?fmtElapsed(elapsedMs()):"—"}</span>${finalized?" total":""} · ${doneSets}/${totalSets} séries · ${pct}%</span></div>
     <div style="height:6px;background:var(--surface2);border-radius:99px;overflow:hidden">
       <div style="width:${pct}%;height:100%;background:var(--amber);border-radius:99px;transition:width .3s ease"></div></div></div>`;
 
@@ -468,7 +483,7 @@ function render(){
       style="width:100%;padding:16px;border-radius:14px;font-size:16px;font-weight:800;border:1px solid ${finalized?"var(--ok)":"var(--amber)"};
       background:${finalized?"transparent":canFinish?"var(--amber)":"var(--surface2)"};
       color:${finalized?"var(--ok)":canFinish?"var(--amber-ink)":"var(--faint)"};opacity:${uploading?".6":"1"}">
-      ${finalized?"✓ Registrado no coach-os":uploading?"Enviando…":"Finalizar treino → registrar"}</button>
+      ${finalized?`✓ Registrado no coach-os${startedAt?" · "+Math.round(elapsedMs()/60000)+" min":""}`:uploading?"Enviando…":"Finalizar treino → registrar"}</button>
     ${store.get("pending-session")?`<button onclick="retryPending()" style="width:100%;margin-top:8px;padding:11px;border-radius:10px;border:1px solid var(--err);background:transparent;color:var(--err);font-size:13px">↻ Reenviar sessão pendente</button>`:""}
   </div>`;
 
